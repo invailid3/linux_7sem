@@ -3,30 +3,40 @@
 planet="$1"
 
 case $planet in
-"Mercury")
+Mercury)
 	echo "0"
+	exit
 	;;
-"Venus")
+Venus)
 	echo "0"
+	exit
 	;;
-"Mars")
+Mars)
 	echo "2"
+	exit
 	;;
-"Jupiter")
+Jupiter)
 	echo "98"
+	exit
 	;;
-"Saturn")
+Saturn)
 	echo "83"
+	exit
 	;;
-"Uranus")
+Uranus)
 	echo "27"
+	exit
 	;;
-"Neptune")
+Neptune)
 	echo "14"
+	exit
 	;;
-"Earth")
+Earth)
 	echo "1"
+	exit
+	;;
+*)
+	echo "Unknown planet"
 	;;
 esac
 
-echo "Unknown planet"

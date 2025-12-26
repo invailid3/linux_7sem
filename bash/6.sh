@@ -14,7 +14,7 @@ fi
 
 while true; do
 	cur_files=$(ls -A)
-	if [[ "$cur" != "$old_files" ]]; then
+	if [[ "$cur_files" != "$old_files" ]]; then
 		echo "operation detected";
 		break
 	fi
