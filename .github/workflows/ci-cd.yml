@@ -1,0 +1,85 @@
+name: CI-CD
+
+on:
+  push:
+    branches: [ master ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_USER: testuser
+          POSTGRES_PASSWORD: testpass
+          POSTGRES_DB: testdb
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v3
+
+    - name: Create .env file for testing
+      working-directory: ./docker
+      run: |
+        cat > .env << EOF
+        DATABASE_URL=postgresql+psycopg://testuser:testpass@localhost:5432/testdb
+        EOF
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v2
+
+    - name: Build test image
+      working-directory: ./docker
+      run: docker compose build test
+
+    - name: Run tests
+      working-directory: ./docker
+      run: docker compose run --rm test
+
+  deploy:
+    needs: test
+    runs-on: self-hosted
+    if : github.ref == 'refs/heads/master'
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v3
+
+    - name: Create .env file
+      working-directory: ./docker
+      run: |
+        cat > .env << EOF
+        DATABASE_URL=${{ secrets.DATABASE_URL }}
+        APP_PORT=8075
+        EOF
+
+    - name: Build prod image
+      working-directory: ./docker
+      run: podman build -t fastapi-app-krizh:latest --target runtime --quiet -f Dockerfile .
+
+    - name: Stop old container
+      run: |
+        podman stop fastapi-app-krizh || true
+        podman rm fastapi-app-krizh || true
+
+    - name: Start new container
+      run: |
+        podman run -d \
+          --replace \
+          --name fastapi-app-krizh \
+          --network host \
+          -e DATABASE_URL=${{ secrets.DATABASE_URL }} \
+          --restart unless-stopped \
+          localhost/fastapi-app-krizh:latest
+
+    - name: Cleanup old images
+      run: podman image prune -af --filter "until=24h"
