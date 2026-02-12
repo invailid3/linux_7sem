@@ -1,85 +1,86 @@
-name: CI-CD
+name: CI/CD
 
 on:
   push:
     branches: [ master ]
 
+permissions:
+  contents: read
+  packages: write
+
+env:
+  IMAGE: ghcr.io/${{ github.repository_owner }}/linux_7sem
+
 jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Login to GHCR
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      - name: Build and push prod image
+        run: |
+          set -e
+          docker build --target runtime -t "${IMAGE}:${{ github.sha }}" .
+          docker push "${IMAGE}:${{ github.sha }}"
+
+      - name: Build and push test image
+        run: |
+          set -e
+          docker build --target test -t "${IMAGE}:test-${{ github.sha }}" .
+          docker push "${IMAGE}:test-${{ github.sha }}"
+
   test:
     runs-on: ubuntu-latest
+    needs: build
 
     services:
-      postgres:
-        image: postgres:15-alpine
+      db:
+        image: postgres:16-alpine
         env:
-          POSTGRES_USER: testuser
-          POSTGRES_PASSWORD: testpass
-          POSTGRES_DB: testdb
+          POSTGRES_USER: kubsu
+          POSTGRES_PASSWORD: kubsu
+          POSTGRES_DB: kubsu
         ports:
           - 5432:5432
         options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
+          --health-cmd "pg_isready -U kubsu -d kubsu"
+          --health-interval 2s
+          --health-timeout 2s
+          --health-retries 30
 
     steps:
-    - name: Checkout
-      uses: actions/checkout@v3
+      - name: Login to GHCR
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
 
-    - name: Create .env file for testing
-      working-directory: ./docker
-      run: |
-        cat > .env << EOF
-        DATABASE_URL=postgresql+psycopg://testuser:testpass@localhost:5432/testdb
-        EOF
+      - name: Pull test image
+        run: docker pull "${IMAGE}:test-${{ github.sha }}"
 
-    - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@v2
-
-    - name: Build test image
-      working-directory: ./docker
-      run: docker compose build test
-
-    - name: Run tests
-      working-directory: ./docker
-      run: docker compose run --rm test
+      - name: Run tests
+        run: |
+          set -e
+          docker run --rm --network host \
+            -e DATABASE_URL="postgresql+psycopg://kubsu:kubsu@127.0.0.1:5432/kubsu" \
+            "${IMAGE}:test-${{ github.sha }}"
 
   deploy:
-    needs: test
     runs-on: self-hosted
-    if : github.ref == 'refs/heads/master'
-
+    needs: test
     steps:
-    - name: Checkout
-      uses: actions/checkout@v3
+      - name: Login to GHCR
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | podman login ghcr.io -u "${{ github.actor }}" --password-stdin
 
-    - name: Create .env file
-      working-directory: ./docker
-      run: |
-        cat > .env << EOF
-        DATABASE_URL=${{ secrets.DATABASE_URL }}
-        APP_PORT=8075
-        EOF
+      - name: Pull and run
+        run: |
+          set -e
+          podman pull "${IMAGE}:${{ github.sha }}"
 
-    - name: Build prod image
-      working-directory: ./docker
-      run: podman build -t fastapi-app-krizh:latest --target runtime --quiet -f Dockerfile .
+          podman rm -f usersapp 2>/dev/null || true
 
-    - name: Stop old container
-      run: |
-        podman stop fastapi-app-krizh || true
-        podman rm fastapi-app-krizh || true
+          podman run -d --name usersapp --network host \
+            -e DATABASE_URL="postgresql+psycopg://kubsu:kubsu@127.0.0.1:5432/kubsu" \
+            "${IMAGE}:${{ github.sha }}"
 
-    - name: Start new container
-      run: |
-        podman run -d \
-          --replace \
-          --name fastapi-app-krizh \
-          --network host \
-          -e DATABASE_URL=${{ secrets.DATABASE_URL }} \
-          --restart unless-stopped \
-          localhost/fastapi-app-krizh:latest
-
-    - name: Cleanup old images
-      run: podman image prune -af --filter "until=24h"
+          podman ps
