@@ -35,8 +35,6 @@ RUN pip install --no-cache-dir --user -e ".[test]"
 
 WORKDIR /app
 
-# Copy test dependencies
-COPY --from=test-build /root/.local /root/.local
 
 COPY . .
 
