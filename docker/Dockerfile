@@ -32,8 +32,6 @@ FROM build as test-build
 
 RUN pip install --no-cache-dir --user -e ".[test]"
 
-# Stage 4: test
-FROM python:3.10.2-slim as test
 
 WORKDIR /app
 

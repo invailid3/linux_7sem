@@ -31,7 +31,7 @@ jobs:
         working-directory: ./docker
         run: |
           set -e
-          docker build --target test -t "${IMAGE}:test-${{ github.sha }}" .
+          docker build --target test-build -t "${IMAGE}:test-${{ github.sha }}" .
           docker push "${IMAGE}:test-${{ github.sha }}"
 
   test:
